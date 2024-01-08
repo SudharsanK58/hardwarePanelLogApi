@@ -311,3 +311,101 @@ async def save_disease_history(request: Request):
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/save_disease_history2")
+async def save_disease_history(request: Request):
+    try:
+        # Access the request body directly
+        data = await request.json()
+
+        # Validate required parameters
+        required_parameters = [
+            "PatientId", "Sex", "obstructiveairwaydisease", 
+            "Smokingtobaccoconsumption", "historyofMI", "PriorsymptomaticHF", 
+            "Age", "creatinine", "Heartrate", "weight", "height_cm", 
+            "SBP", "DBP", "Bloodglucose", "Hb", "BNP", "HTN", "DM"
+        ]
+
+        for param in required_parameters:
+            if param not in data:
+                raise HTTPException(status_code=422, detail=f"Missing required parameter: {param}")
+
+            if not isinstance(data[param], int):
+                raise HTTPException(status_code=422, detail=f"Parameter {param} must be an integer")
+
+        # Extract required parameters from the request body
+        patient_id = data["PatientId"]
+        sex = data["Sex"]
+        obstructive_airway_disease = data["obstructiveairwaydisease"]
+        smoking_tobacco_consumption = data["Smokingtobaccoconsumption"]
+        history_of_MI = data["historyofMI"]
+        prior_symptomatic_HF = data["PriorsymptomaticHF"]
+        age = data["Age"]
+        creatinine = data["creatinine"]
+        heart_rate = data["Heartrate"]
+        weight = data["weight"]
+        height_cm = data["height_cm"]
+        sbp = data["SBP"]
+        dbp = data["DBP"]
+        blood_glucose = data["Bloodglucose"]
+        hb = data["Hb"]
+        bnp = data["BNP"]
+        htn = data["HTN"]
+        dm = data["DM"]
+
+        # Convert height to meters
+        height_m = height_cm / 100
+
+        # Calculate derived parameters
+        mbp = (sbp + (2 * dbp)) / 3
+        egfr = (140 - age) * (weight) / (creatinine * 72)
+
+        # Calculate BMI
+        bmi = weight / (height_m ** 2)
+
+        # Calculate withlab and withoutlab values
+        withlab = (
+            0.082 * sex - 0.04 * obstructive_airway_disease +
+            0.007 * smoking_tobacco_consumption + 0.2 * history_of_MI +
+            0.436 * prior_symptomatic_HF + 0.058 * age - 0.003 * heart_rate -
+            0.006 * bmi - 0.04 * mbp + 0.051 * blood_glucose - 0.031 * hb -
+            0.103 * egfr + 0.142 * bnp
+        )
+
+        withoutlab = (
+            -0.137 + 1.89 * age + 0.067 * sex + 0.003 * bmi + 0.036 * heart_rate +
+            0.055 * sbp - 0.078 * dbp - 0.107 * htn + 0.004 * dm -
+            0.054 * obstructive_airway_disease - 0.02 * smoking_tobacco_consumption +
+            0.184 * history_of_MI + 0.453 * prior_symptomatic_HF
+        )
+
+        # Find the patient by ID
+        patient = patient_details_collection.find_one({"PatientId": patient_id})
+
+        if not patient:
+            raise HTTPException(status_code=404, detail="Patient not found")
+
+        # Update the patient's information with the calculated values
+        patient_details_collection.update_one(
+            {"PatientId": patient_id},
+            {"$set": {
+                "disease.withlab": withlab,
+                "disease.withoutlab": withoutlab,
+                "BMI": bmi,
+            }},
+        )
+
+        # Return the patient's name and calculated values
+        return {
+            "PatientName": patient.get("Name", "Unknown"),
+            "withlab": withlab,
+            "withoutlab": withoutlab,
+            "BMI": bmi,
+        }
+
+    except HTTPException as http_exc:
+        # Forward HTTPException with custom detail message
+        raise http_exc
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
