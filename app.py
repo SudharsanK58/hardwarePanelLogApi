@@ -364,12 +364,17 @@ async def save_disease_history(request: Request):
         bmi = weight / (height_m ** 2)
 
         # Calculate withlab and withoutlab values
-        withlab = (
-            0.082 * sex - 0.04 * obstructive_airway_disease +
-            0.007 * smoking_tobacco_consumption + 0.2 * history_of_MI +
-            0.436 * prior_symptomatic_HF + 0.058 * age - 0.003 * heart_rate -
-            0.006 * bmi - 0.04 * mbp + 0.051 * blood_glucose - 0.031 * hb -
-            0.103 * egfr + 0.142 * bnp
+        withlab  = (
+            -0.08 + 
+            1.175 * age + 
+            0.874 * bmi + 
+            0.794 * mbp + 
+            0.917 * sex + 
+            0.676 * blood_glucose + 
+            (-0.002) * hb + 
+            (-1.28) * egfr + 
+            1.2634 * bnp + 
+            0.489 * heart_rate
         )
 
         withoutlab = (
