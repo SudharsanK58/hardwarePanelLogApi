@@ -330,7 +330,7 @@ async def save_disease_history(request: Request):
             if param not in data:
                 raise HTTPException(status_code=422, detail=f"Missing required parameter: {param}")
 
-            if not isinstance(data[param], int):
+            if not isinstance(data[param], (int, float)):
                 raise HTTPException(status_code=422, detail=f"Parameter {param} must be an integer")
 
         # Extract required parameters from the request body
