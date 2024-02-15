@@ -397,6 +397,25 @@ async def save_disease_history(request: Request):
                 "disease.withlab": withlab,
                 "disease.withoutlab": withoutlab,
                 "BMI": bmi,
+                "original_parameters": {
+                    "Sex": sex,
+                    "obstructiveairwaydisease": obstructive_airway_disease,
+                    "Smokingtobaccoconsumption": smoking_tobacco_consumption,
+                    "historyofMI": history_of_MI,
+                    "PriorsymptomaticHF": prior_symptomatic_HF,
+                    "Age": age,
+                    "creatinine": creatinine,
+                    "Heartrate": heart_rate,
+                    "weight": weight,
+                    "height_cm": height_cm,
+                    "SBP": sbp,
+                    "DBP": dbp,
+                    "Bloodglucose": blood_glucose,
+                    "Hb": hb,
+                    "BNP": bnp,
+                    "HTN": htn,
+                    "DM": dm,
+                },
             }},
         )
 
@@ -406,6 +425,7 @@ async def save_disease_history(request: Request):
             "withlab": withlab,
             "withoutlab": withoutlab,
             "BMI": bmi,
+            "patientId": patient_id
         }
 
     except HTTPException as http_exc:
@@ -414,3 +434,88 @@ async def save_disease_history(request: Request):
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+    
+@app.get("/get_patient_info/{patient_id}")
+async def get_patient_info(patient_id: int):
+    # Find the patient by ID
+    patient = patient_details_collection.find_one({"PatientId": patient_id})
+
+    if not patient:
+        raise HTTPException(status_code=404, detail="Patient not found")
+
+    # Extract original parameters
+    original_parameters = patient.get("original_parameters", {})
+
+    # Return the relevant patient information
+    return {
+        "Name": patient.get("Name", "Unknown"),
+        "Age": original_parameters.get("Age"),
+        "Gender": original_parameters.get("Sex"),
+        "City": patient.get("City"),
+        "Height": patient.get("Height"),
+        "Weight": patient.get("Weight"),
+        "PhoneNumber": patient.get("PhoneNumber"),
+    }
+
+@app.post("/update_patient_info/{patient_id}")
+async def update_patient_info(patient_id: int, request: Request):
+    try:
+        # Access the request body directly
+        data = await request.json()
+
+        # Validate and update the patient's information
+        patient_details_collection.update_one(
+            {"PatientId": patient_id},
+            {"$set": {
+                "Name": data.get("name"),
+                "Age": data.get("age"),
+                "Gender": data.get("gender"),
+                "City": data.get("city"),
+                "Height": data.get("height"),
+                "Weight": data.get("weight"),
+                "PhoneNumber": data.get("phone_number"),
+            }},
+        )
+
+        # Return a success message
+        return {"PatientId": patient_id}
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    
+@app.get("/get_patient_by_id/{patient_id}")
+async def get_patient_by_id(patient_id: int):
+    try:
+        # Find the patient by ID
+        patient = patient_details_collection.find_one({"PatientId": patient_id})
+
+        if not patient:
+            raise HTTPException(status_code=404, detail="Patient not found")
+
+        # Extract relevant information
+        patient_info = {
+            "PatientId": patient.get("PatientId"),
+            "Sex": patient.get("original_parameters", {}).get("Sex"),
+            "obstructive_airway_disease": patient.get("original_parameters", {}).get("obstructiveairwaydisease"),
+            "Smokingtobaccoconsumption": patient.get("original_parameters", {}).get("Smokingtobaccoconsumption"),
+            "historyofMI": patient.get("original_parameters", {}).get("historyofMI"),
+            "PriorsymptomaticHF": patient.get("original_parameters", {}).get("PriorsymptomaticHF"),
+            "Age": patient.get("original_parameters", {}).get("Age"),
+            "creatinine": patient.get("original_parameters", {}).get("creatinine"),
+            "Heartrate": patient.get("original_parameters", {}).get("Heartrate"),
+            "weight": patient.get("original_parameters", {}).get("weight"),
+            "height_cm": patient.get("original_parameters", {}).get("height_cm"),
+            "SBP": patient.get("original_parameters", {}).get("SBP"),
+            "DBP": patient.get("original_parameters", {}).get("DBP"),
+            "Bloodglucose": patient.get("original_parameters", {}).get("Bloodglucose"),
+            "Hb": patient.get("original_parameters", {}).get("Hb"),
+            "BNP": patient.get("original_parameters", {}).get("BNP"),
+            "HTN": patient.get("original_parameters", {}).get("HTN"),
+            "DM": patient.get("original_parameters", {}).get("DM"),
+        }
+
+        return patient_info
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Internal Server Error: {str(e)}")
+
