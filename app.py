@@ -3,6 +3,7 @@ from pymongo import MongoClient
 from fastapi.middleware.cors import CORSMiddleware
 from datetime import datetime, timedelta
 import os
+import requests
 
 app = FastAPI()
 
@@ -519,3 +520,207 @@ async def get_patient_by_id(patient_id: int):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Internal Server Error: {str(e)}")
 
+@app.get("/clients")
+async def get_clients(request: Request):
+    try:
+        # Make a request to the external API
+        api_url = "https://zig-config.zed-admin.com/api/v1/Devices/Getmacaddresslist"
+        response = requests.get(api_url)
+
+        # Check if the request was successful (status code 200)
+        if response.status_code == 200:
+            # Parse the JSON response
+            device_data = response.json()
+
+            # Extract unique client names
+            unique_client_names = list({device["Clientname"] for device in device_data})
+            
+            # Add "All Client Devices" to the list at the beginning
+            unique_client_names.insert(0, "All Client Devices")
+
+            return unique_client_names
+        else:
+            # Raise an exception for non-successful responses
+            response.raise_for_status()
+
+    except requests.RequestException as e:
+        raise HTTPException(status_code=500, detail=f"Error fetching data from external API: {str(e)}")
+
+@app.get("/macaddresses")
+async def get_mac_addresses(client_name: str):
+    try:
+        # Make a request to the external API
+        api_url = "https://zig-config.zed-admin.com/api/v1/Devices/Getmacaddresslist"
+        response = requests.get(api_url, params={"client_name": client_name})
+
+        # Check if the request was successful (status code 200)
+        if response.status_code == 200:
+            # Parse the JSON response
+            device_data = response.json()
+
+            # Filter devices by the specified client name
+            mac_addresses = [device["Macaddress"] for device in device_data if device["Clientname"] == client_name]
+
+            # Retrieve data from the DeviceLog collection based on the matching MAC addresses
+            query = {"deviceId": {"$in": mac_addresses}}
+            sorted_device_data = list(device_collection.find(query).sort("timestamp", -1))
+
+            # Format the response data
+            formatted_device_data = [
+                {
+                    "deviceId": doc.get("deviceId", "N/A"),
+                    "timestamp": doc.get("timestamp", "N/A"),
+                    "StartingTime": doc.get("StartingTime", "N/A"),
+                    "validationTopic": doc.get("validationTopic", "N/A"),
+                    "bleMacAddress": doc.get("bleMacAddress", "N/A"),
+                    "networkConnection": doc.get("networkConnection", "N/A"),
+                    "networkName": doc.get("networkName", "N/A"),
+                    "bleMinor": doc.get("bleMinor", "N/A"),
+                    "bleTxpower": doc.get("bleTxpower", "N/A"),
+                    "bleVersion": doc.get("bleVersion", "N/A"),
+                    "current temp": doc.get("current temp", "N/A"),
+                    "firmwareVersion": doc.get("firmwareVersion", "N/A")
+                }
+                for doc in sorted_device_data
+            ]
+
+            return formatted_device_data
+        else:
+            # Raise an exception for non-successful responses
+            response.raise_for_status()
+
+    except requests.RequestException as e:
+        raise HTTPException(status_code=500, detail=f"Error fetching data from external API: {str(e)}")
+
+def get_active_devices_count(query):
+    try:
+        # Use count_documents method to count the number of active devices
+        active_devices_count = device_collection.count_documents(query)
+
+        return active_devices_count
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/active_devices_counts")
+async def get_active_devices_counts():
+    try:
+        # Calculate the timestamp thresholds for the last 10 minutes, 12 hours, and 24 hours
+        threshold_10mins = datetime.utcnow() - timedelta(minutes=10)
+        threshold_12hrs = datetime.utcnow() - timedelta(hours=12)
+        threshold_24hrs = datetime.utcnow() - timedelta(hours=24)
+
+        # Create queries to filter documents based on the timestamps
+        query_10mins = {"timestamp": {"$gte": threshold_10mins}}
+        query_12hrs = {"timestamp": {"$gte": threshold_12hrs}}
+        query_24hrs = {"timestamp": {"$gte": threshold_24hrs}}
+
+        # Get counts for each time interval
+        active_devices_10mins = get_active_devices_count(query_10mins)
+        active_devices_12hrs = get_active_devices_count(query_12hrs)
+        active_devices_24hrs = get_active_devices_count(query_24hrs)
+
+        # Format the response as a list with key-value pairs
+        response_data = [
+            {"active_devices_10min": active_devices_10mins},
+            {"active_devices_12hrs": active_devices_12hrs},
+            {"active_devices_24hrs": active_devices_24hrs},
+        ]
+
+        return response_data
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+def get_temperature_stats():
+    try:
+        # Use aggregate to calculate average, lowest, and highest temperature
+        temperature_stats = device_collection.aggregate([
+            {
+                "$match": {
+                    "current temp": {"$ne": "N/A"}
+                }
+            },
+            {
+                "$group": {
+                    "_id": None,
+                    "average_temp": {"$avg": {"$toDouble": "$current temp"}},
+                    "lowest_temp": {"$min": {"$toDouble": "$current temp"}},
+                    "highest_temp": {"$max": {"$toDouble": "$current temp"}},
+                }
+            },
+            {
+                "$project": {
+                    "average_temp": {"$round": ["$average_temp", 2]},
+                    "lowest_temp": {"$round": ["$lowest_temp", 2]},
+                    "highest_temp": {"$round": ["$highest_temp", 2]},
+                }
+            }
+        ])
+
+        # Extract the result from the cursor
+        result = list(temperature_stats)
+
+        # Check if the values are float before including them in the result
+        if result:
+            result = result[0]
+            result = {k: v for k, v in result.items() if isinstance(v, float)}
+
+        return result
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/temperature_stats")
+async def get_temperature_stats_endpoint():
+    try:
+        # Get average, lowest, and highest temperature stats
+        temperature_stats = get_temperature_stats()
+
+        return temperature_stats
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+def get_time_range_query(start_time, end_time):
+    return {
+        "now_time": {"$gte": start_time, "$lt": end_time},
+        "username": {"$nin": ["Illegal", "N/A"]},  # Exclude documents with username "Illegal"
+    }
+
+@app.get("/ticket_counts")
+async def get_ticket_counts():
+    try:
+        # Use distinct to get unique ticket_id values in the entire collection
+        total_unique_ticket_ids = collection.distinct("ticket_id")
+
+        # Calculate the time range for the last 24 hours
+        end_time_last_24hrs = datetime.utcnow()
+        start_time_last_24hrs = end_time_last_24hrs - timedelta(hours=24)
+
+        # Create query for the last 24 hours
+        query_last_24hrs = get_time_range_query(start_time_last_24hrs, end_time_last_24hrs)
+
+        # Use distinct to get unique ticket_id values for the last 24 hours
+        last_24hrs_unique_ticket_ids = collection.distinct("ticket_id", query_last_24hrs)
+
+        # Calculate the time range for the last week
+        end_time_last_week = datetime.utcnow()
+        start_time_last_week = end_time_last_week - timedelta(days=7)
+
+        # Create query for the last week
+        query_last_week = get_time_range_query(start_time_last_week, end_time_last_week)
+
+        # Use distinct to get unique ticket_id values for the last week
+        last_week_unique_ticket_ids = collection.distinct("ticket_id", query_last_week)
+
+        # Count the number of distinct ticket_id values
+        total_unique_ticket_count = len(total_unique_ticket_ids)
+        last_24hrs_unique_ticket_count = len(last_24hrs_unique_ticket_ids)
+        last_week_unique_ticket_count = len(last_week_unique_ticket_ids)
+
+        return {
+            "total_unique_ticket_count": total_unique_ticket_count,
+            "last_24hrs_unique_ticket_count": last_24hrs_unique_ticket_count,
+            "last_week_unique_ticket_count": last_week_unique_ticket_count,
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
