@@ -724,3 +724,50 @@ async def get_ticket_counts():
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/active_devices_percentage")
+async def get_active_devices_percentage():
+    try:
+        # Make a request to the external API to get unique client names
+        api_url = "https://zig-config.zed-admin.com/api/v1/Devices/Getmacaddresslist"
+        response = requests.get(api_url)
+
+        # Check if the request was successful (status code 200)
+        if response.status_code == 200:
+            # Parse the JSON response
+            device_data = response.json()
+
+            # Get unique client names
+            unique_client_names = set(device["Clientname"] for device in device_data)
+
+            result = []
+
+            for client_name in unique_client_names:
+                # Filter devices by the specified client name
+                mac_addresses = [device["Macaddress"] for device in device_data if device["Clientname"] == client_name]
+
+                # Retrieve data from the DeviceLog collection based on the matching MAC addresses and timestamp
+                twelve_hours_ago = datetime.utcnow() - timedelta(hours=12)
+                query = {"deviceId": {"$in": mac_addresses}, "timestamp": {"$gt": twelve_hours_ago}}
+                active_device_data = list(device_collection.find(query))
+
+                # Calculate the required metrics
+                total_device_ids = len(mac_addresses)
+                active_device_ids = len(active_device_data)
+                active_device_percentage = round((active_device_ids / total_device_ids) * 100) if total_device_ids > 0 else 0
+
+                result.append({
+                    "client_name": client_name,
+                    "total_device_ids": total_device_ids,
+                    "active_device_ids": active_device_ids,
+                    "active_device_percentage": active_device_percentage
+                })
+
+            return result
+
+        else:
+            # Raise an exception for non-successful responses
+            response.raise_for_status()
+
+    except requests.RequestException as e:
+        raise HTTPException(status_code=500, detail=f"Error fetching data from external API: {str(e)}")
