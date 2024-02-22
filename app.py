@@ -22,6 +22,7 @@ collection = db.TicketLog
 device_collection = db.DeviceLog  # New collection
 attendants_collection = db.Attendants
 patient_details_collection = db.patientDetails
+tof_count_collection = db.TofCount
 
 
 @app.get("/device_log_data")
@@ -771,3 +772,94 @@ async def get_active_devices_percentage():
 
     except requests.RequestException as e:
         raise HTTPException(status_code=500, detail=f"Error fetching data from external API: {str(e)}")
+
+# @app.get("/get_data_by_device_id/{device_id}")
+# async def get_data_by_device_id(device_id: str):
+#     try:
+#         # Check if the device_id exists in TofCount collection
+#         tof_count_doc = tof_count_collection.find_one({"deviceId": device_id})
+
+#         if not tof_count_doc:
+#             raise HTTPException(status_code=404, detail=f"Device ID {device_id} not found in TofCount collection")
+
+#         # Get the starting time from TofCount document
+#         starting_time = tof_count_doc["StartingTime"]
+
+#         # Calculate the end time as current time
+#         end_time = datetime.utcnow()
+
+#         # Query TicketLog collection for documents within the time range
+#         query = {
+#             "device_id": device_id,
+#             "now_time": {"$gte": starting_time, "$lt": end_time}
+#         }
+
+#         # Retrieve, format, and return data
+#         device_data = []
+#         for doc in collection.find(query).sort("now_time", 1):
+#             formatted_data = {
+#                 "username": doc["username"],
+#                 "ticket_type": doc["ticket_type"],
+#                 "ticket_id": doc["ticket_id"],
+#                 "device_id": doc["device_id"],
+#                 "time_after_start": (doc["now_time"] - starting_time).total_seconds()
+#             }
+#             device_data.append(formatted_data)
+
+#         return device_data
+
+#     except Exception as e:
+#         raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/get_data_by_device_id/{device_id}")
+async def get_data_by_device_id(device_id: str):
+    try:
+        # Check if the device_id exists in TofCount collection
+        tof_count_doc = tof_count_collection.find_one({"deviceId": device_id})
+
+        if not tof_count_doc:
+            raise HTTPException(status_code=404, detail=f"Device ID {device_id} not found in TofCount collection")
+
+        # Get the starting time and ticket count from TofCount document
+        starting_time = tof_count_doc["StartingTime"]
+        tof_people = tof_count_doc["count"]
+        ticket_count = tof_count_doc.get("ticket_count", 0)
+
+        # Calculate the end time as current time
+        end_time = datetime.utcnow()
+
+        # Query TicketLog collection for documents within the time range
+        query = {
+            "device_id": device_id,
+            "now_time": {"$gte": starting_time, "$lt": end_time}
+        }
+
+        # Retrieve, format, and return data
+        device_data = []
+        total_tickets_count = 0
+        tickets_data = []
+        for doc in collection.find(query).sort("now_time", 1):
+            ticket_count_doc = doc.get("ticket_count", 0)
+            total_tickets_count += ticket_count_doc
+
+            formatted_data = {
+                "username": doc["username"],
+                "ticket_type": doc["ticket_type"],
+                "ticket_id": doc["ticket_id"],
+                "time_after_start": doc["now_time"],
+                "ticket_count": ticket_count_doc
+            }
+            tickets_data.append(formatted_data)
+
+        return {
+            "TofData": {
+                "deviceId": device_id,
+                "starting_time": starting_time,
+                "people_count" : tof_people,
+                "total_tickets_count": total_tickets_count,
+            },
+            "TicketData": tickets_data
+        }
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
