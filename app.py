@@ -837,19 +837,26 @@ async def get_data_by_device_id(device_id: str):
         # Retrieve, format, and return data
         device_data = []
         total_tickets_count = 0
+        unique_ticket_ids = set()
         tickets_data = []
-        for doc in collection.find(query).sort("now_time", 1):
+        for doc in collection.find(query).sort("now_time", -1):
+            if doc["username"] == "Illegal" or doc["ticket_id"] == "N/A":
+                continue
+
             ticket_count_doc = doc.get("ticket_count", 0)
             total_tickets_count += ticket_count_doc
 
-            formatted_data = {
-                "username": doc["username"],
-                "ticket_type": doc["ticket_type"],
-                "ticket_id": doc["ticket_id"],
-                "time_after_start": doc["now_time"],
-                "ticket_count": ticket_count_doc
-            }
-            tickets_data.append(formatted_data)
+            # Include only unique ticket_id
+            if doc["ticket_id"] not in unique_ticket_ids:
+                unique_ticket_ids.add(doc["ticket_id"])
+                formatted_data = {
+                    "username": doc["username"],
+                    "ticket_type": doc["ticket_type"],
+                    "ticket_id": doc["ticket_id"],
+                    "time_after_start": doc["now_time"],
+                    "ticket_count": ticket_count_doc
+                }
+                tickets_data.append(formatted_data)
 
         return {
             "TofData": {
