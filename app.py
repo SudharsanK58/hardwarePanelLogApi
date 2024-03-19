@@ -97,7 +97,7 @@ async def get_today_data_device_id(device_id: str):
     try:
         # Calculate the time range for the last 24 hours
         end_time = datetime.utcnow()
-        start_time = end_time - timedelta(hours=24)
+        start_time = end_time - timedelta(hours=240)
 
         # Calculate the time difference between UTC and IST
         utc_offset = timedelta(hours=5, minutes=30)  # IST is UTC+5:30
@@ -748,7 +748,7 @@ async def get_active_devices_percentage():
                 mac_addresses = [device["Macaddress"] for device in device_data if device["Clientname"] == client_name]
 
                 # Retrieve data from the DeviceLog collection based on the matching MAC addresses and timestamp
-                twelve_hours_ago = datetime.utcnow() - timedelta(hours=12)
+                twelve_hours_ago = datetime.utcnow() - timedelta(hours=24)
                 query = {"deviceId": {"$in": mac_addresses}, "timestamp": {"$gt": twelve_hours_ago}}
                 active_device_data = list(device_collection.find(query))
 
@@ -763,7 +763,7 @@ async def get_active_devices_percentage():
                     "active_device_ids": active_device_ids,
                     "active_device_percentage": active_device_percentage
                 })
-
+            result = sorted(result, key=lambda x: x['active_device_ids'], reverse=True)
             return result
 
         else:
@@ -773,43 +773,6 @@ async def get_active_devices_percentage():
     except requests.RequestException as e:
         raise HTTPException(status_code=500, detail=f"Error fetching data from external API: {str(e)}")
 
-# @app.get("/get_data_by_device_id/{device_id}")
-# async def get_data_by_device_id(device_id: str):
-#     try:
-#         # Check if the device_id exists in TofCount collection
-#         tof_count_doc = tof_count_collection.find_one({"deviceId": device_id})
-
-#         if not tof_count_doc:
-#             raise HTTPException(status_code=404, detail=f"Device ID {device_id} not found in TofCount collection")
-
-#         # Get the starting time from TofCount document
-#         starting_time = tof_count_doc["StartingTime"]
-
-#         # Calculate the end time as current time
-#         end_time = datetime.utcnow()
-
-#         # Query TicketLog collection for documents within the time range
-#         query = {
-#             "device_id": device_id,
-#             "now_time": {"$gte": starting_time, "$lt": end_time}
-#         }
-
-#         # Retrieve, format, and return data
-#         device_data = []
-#         for doc in collection.find(query).sort("now_time", 1):
-#             formatted_data = {
-#                 "username": doc["username"],
-#                 "ticket_type": doc["ticket_type"],
-#                 "ticket_id": doc["ticket_id"],
-#                 "device_id": doc["device_id"],
-#                 "time_after_start": (doc["now_time"] - starting_time).total_seconds()
-#             }
-#             device_data.append(formatted_data)
-
-#         return device_data
-
-#     except Exception as e:
-#         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/get_data_by_device_id/{device_id}")
 async def get_data_by_device_id(device_id: str):
@@ -857,16 +820,134 @@ async def get_data_by_device_id(device_id: str):
                     "ticket_count": ticket_count_doc
                 }
                 tickets_data.append(formatted_data)
-
+        illgels = max(0,tof_people - total_tickets_count)
         return {
             "TofData": {
                 "deviceId": device_id,
                 "starting_time": starting_time,
                 "people_count" : tof_people,
                 "total_tickets_count": total_tickets_count,
+                "Illgel_count": illgels,
             },
             "TicketData": tickets_data
         }
 
     except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/search_ticket/{ticket_id}")
+async def search_ticket(ticket_id: int):
+    try:
+        # Retrieve the ticket information based on ticket_id
+        if ticket_id == "N/A":
+            raise HTTPException(status_code=400, detail="Invalid ticket_id")
+        query = {"ticket_id": ticket_id}
+        ticket_data = collection.find_one(query)
+
+        if not ticket_data:
+            raise HTTPException(status_code=404, detail="Ticket not found")
+        device_tickets = []
+        # Prepare the response with formatted UTC timestamps
+        response_data = {
+            "Device ID": ticket_data["device_id"],
+            "User name": ticket_data["username"],
+            "Ticket ID": ticket_data["ticket_id"],
+            "Ticket type": ticket_data["ticket_type"],
+            "Ticket Count": ticket_data["ticket_count"],
+            "Validated date": ticket_data["now_time"].strftime('%Y-%m-%dT%H:%M:%S.%f')[:-3]
+        }
+        device_tickets.append(response_data)
+        return device_tickets
+
+    except HTTPException as e:
+        # Return the detailed error response for HTTPException
+        raise e
+    except Exception as e:
+        # Improve the error response for other exceptions
+        raise HTTPException(status_code=500, detail="Internal Server Error")
+
+# ... (your existing imports)
+
+# Endpoint to get latest 20 ticket data for a device on a specific date
+@app.get("/device_tickets")
+async def get_device_tickets(device_id: str, date: str):
+    try:
+        # Parse the input date
+        target_date = datetime.strptime(date, '%m/%d/%Y').date()
+
+        # Calculate the time range for the given date
+        start_time = datetime.combine(target_date, datetime.min.time())
+        end_time = datetime.combine(target_date, datetime.max.time())
+
+        print(f"Start Time: {start_time}")
+        print(f"End Time: {end_time}")
+
+        query = {
+            "device_id": device_id,
+            "now_time": {"$gte": start_time, "$lt": end_time},
+            "username": {"$nin": ["N/A", "Illegal"]},  # Exclude specified usernames
+            "ticket_id": {"$ne": "N/A"}
+        }
+
+        # Retrieve, sort, and limit the data
+        latest_device_tickets = []
+        for doc in collection.find(query).sort("now_time", -1).limit(20):
+            formatted_data = {
+                "Device ID": doc["device_id"],
+                "User name": doc["username"],
+                "Ticket ID": doc["ticket_id"],
+                "Ticket type": doc["ticket_type"],
+                "Ticket Count": doc["ticket_count"],
+                "Validated date": doc["now_time"].strftime('%Y-%m-%dT%H:%M:%S.%f')[:-3]
+            }
+            latest_device_tickets.append(formatted_data)
+
+        if not latest_device_tickets:
+            raise HTTPException(status_code=404, detail="Ticket not found")
+
+        return latest_device_tickets
+
+    except Exception as e:
+        print(f"Error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/latest_tickets")
+async def get_latest_tickets(date: str):
+    try:
+        # Parse the input date
+        target_date = datetime.strptime(date, '%m/%d/%Y').date()
+
+        # Calculate the time range for the given date
+        start_time = datetime.combine(target_date, datetime.min.time())
+        end_time = datetime.combine(target_date, datetime.max.time())
+
+        print(f"Start Time: {start_time}")
+        print(f"End Time: {end_time}")
+
+        query = {
+            "now_time": {"$gte": start_time, "$lt": end_time},
+            "username": {"$nin": ["N/A", "Illegal"]},  # Exclude specified usernames
+            "ticket_id": {"$ne": "N/A"}
+        }
+
+        # Retrieve, sort, and limit the data
+        latest_tickets = []
+        for doc in collection.find(query).sort("now_time", -1).limit(20):
+            formatted_data = {
+                "Device ID": doc["device_id"],
+                "User name": doc["username"],
+                "Ticket ID": doc["ticket_id"],
+                "Ticket type": doc["ticket_type"],
+                "Ticket Count": doc["ticket_count"],
+                "Validated date": doc["now_time"].strftime('%Y-%m-%dT%H:%M:%S.%f')[:-3]
+            }
+            latest_tickets.append(formatted_data)
+
+        if not latest_tickets:
+            raise HTTPException(status_code=404, detail="Ticket not found")
+
+        return latest_tickets
+
+    except Exception as e:
+        print(f"Error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
